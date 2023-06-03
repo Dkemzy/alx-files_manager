@@ -1,34 +1,37 @@
-import express from 'express';
-import appController from '../controller/AppController';
-import userController from '../controller/UsersController';
-import authController from '../controller/AuthController';
-import filesController from '../controller/FilesController';
+// eslint-disable-next-line no-unused-vars
+import { Express } from 'express';
+import AppController from '../controllers/AppController';
+import AuthController from '../controllers/AuthController';
+import UsersController from '../controllers/UsersController';
+import FilesController from '../controllers/FilesController';
+import { basicAuthenticate, xTokenAuthenticate } from '../middlewares/auth';
+import { APIError, errorResponse } from '../middlewares/error';
 
-const router = express.Router();
+/**
+ * Injects routes with their handlers to the given Express application.
+ * @param {Express} api
+ */
+const injectRoutes = (api) => {
+  api.get('/status', AppController.getStatus);
+  api.get('/stats', AppController.getStats);
 
-// Get db status
-router.get('/status', (req, res) => appController.getStatus(req, res));
-// Get db and redis stats
-router.get('/stats', (req, res) => appController.getStats(req, res));
-// Create new user
-router.post('/users', (req, res) => userController.postNew(req, res));
-// Get user by token
-router.get('/users/me', (req, res) => userController.getMe(req, res));
-// Connect user and create new session
-router.get('/connect', (req, res) => authController.getConnect(req, res));
-// Disconnect user and remove session
-router.get('/disconnect', (req, res) => authController.getDisconnect(req, res));
-// Upolad a new file
-router.post('/files', (req, res) => filesController.postUpload(req, res));
-// Get a file based on id
-router.get('/files/:id', (req, res) => filesController.getShow(req, res));
-// Get all files based on a folder Id
-router.get('/files', (req, res) => filesController.getIndex(req, res));
-// change public status of  to true
-router.put('/files/:id/publish', (req, res) => filesController.putPublish(req, res));
-// change public status of  to false
-router.put('/files/:id/unpublish', (req, res) => filesController.putUnpublish(req, res));
+  api.get('/connect', basicAuthenticate, AuthController.getConnect);
+  api.get('/disconnect', xTokenAuthenticate, AuthController.getDisconnect);
 
-router.get("/files/:id/data", (req, res) => filesController.getFile(req, res));
-//  return the content of the file document based on the ID
-export default router;
+  api.post('/users', UsersController.postNew);
+  api.get('/users/me', xTokenAuthenticate, UsersController.getMe);
+
+  api.post('/files', xTokenAuthenticate, FilesController.postUpload);
+  api.get('/files/:id', xTokenAuthenticate, FilesController.getShow);
+  api.get('/files', xTokenAuthenticate, FilesController.getIndex);
+  api.put('/files/:id/publish', xTokenAuthenticate, FilesController.putPublish);
+  api.put('/files/:id/unpublish', xTokenAuthenticate, FilesController.putUnpublish);
+  api.get('/files/:id/data', FilesController.getFile);
+
+  api.all('*', (req, res, next) => {
+    errorResponse(new APIError(404, `Cannot ${req.method} ${req.url}`), req, res, next);
+  });
+  api.use(errorResponse);
+};
+
+export default injectRoutes;
