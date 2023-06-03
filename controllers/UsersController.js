@@ -1,40 +1,40 @@
-import crypto from 'crypto';
-import { ObjectId } from 'mongodb';
+/* eslint-disable import/no-named-as-default */
+import sha1 from 'sha1';
+import Queue from 'bull/lib/queue';
 import dbClient from '../utils/db';
-import redisClient from '../utils/redis';
 
-export function hashPassword(password) {
-  const sha1 = crypto.createHash('sha1');
-  sha1.update(password);
-  return sha1.digest('hex');
-}
+const userQueue = new Queue('email sending');
 
-class UsersControllers {
-  async postNew(req, res) {
-    const { email, password } = req.body;
-    if (!email) return res.status(400).send({ error: 'Missing email' });
-    if (!password) return res.status(400).send({ error: 'Missing password' });
+export default class UsersController {
+  static async postNew(req, res) {
+    const email = req.body ? req.body.email : null;
+    const password = req.body ? req.body.password : null;
 
-    const user = await dbClient.db.collection('users').findOne({ email });
-    if (user) return res.status(400).send({ error: 'Already exist' });
-    const hashedPass = hashPassword(password);
-    const newUser = await dbClient.db.collection('users').insertOne({ email, password: hashedPass });
-    return res.status(200).send({ id: newUser.insertedId, email: newUser.ops[0].email });
+    if (!email) {
+      res.status(400).json({ error: 'Missing email' });
+      return;
+    }
+    if (!password) {
+      res.status(400).json({ error: 'Missing password' });
+      return;
+    }
+    const user = await (await dbClient.usersCollection()).findOne({ email });
+
+    if (user) {
+      res.status(400).json({ error: 'Already exist' });
+      return;
+    }
+    const insertionInfo = await (await dbClient.usersCollection())
+      .insertOne({ email, password: sha1(password) });
+    const userId = insertionInfo.insertedId.toString();
+
+    userQueue.add({ userId });
+    res.status(201).json({ email, id: userId });
   }
 
-  async getMe(req, res) {
-    const tokenHeader = req.headers['x-token'];
-    // Get the user id from redis store using token as key
-    const userId = await redisClient.get(`auth_${tokenHeader}`);
-    console.log(userId);
-    // Get the user from the database using the user id
-    const user = await dbClient.db.collection('users').findOne({ _id: new ObjectId(userId) });
-    // res.status(401).send({ error: 'Unauthorized' }); // if user not found
-    if (!user) return res.status(401).send({ error: 'Unauthorized' });
-    // Return the user
-    return res.status(200).send(user);
+  static async getMe(req, res) {
+    const { user } = req;
+
+    res.status(200).json({ email: user.email, id: user._id.toString() });
   }
 }
-
-const userController = new UsersControllers();
-export default userController;
